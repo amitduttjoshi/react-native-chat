@@ -1,0 +1,88 @@
+// setup the server
+// setup the server
+var express = require ('express');
+var http = require ('http');
+var socketio = require ('socket.io');
+var mongojs = require ('mongojs');
+
+// init server vars
+var ObjectID = mongojs.ObjectID;
+var db = mongojs (process.env.MONGO_URL || 'mongodb://localhost:27017/local');
+var app = express ();
+var server = http.Server (app);
+var websocket = socketio (server);
+server.listen (3000, () => console.log ('Listening server on : 3000'));
+
+// chat and user vars
+var clients = {};
+var users = {};
+
+// defining listeners
+websocket.on ('connection', socket => {
+  clients[socket.id] = socket;
+  socket.on ('userJoined', userId => onUserJoined (userId, socket));
+  socket.on ('message', message => onMessageReceived (message, socket));
+});
+
+// function for listeners
+function onUserJoined (userId, socket) {
+  try {
+    if (!userId) {
+      var user = db.collection ('users').insert ({}, (err, user) => {
+        socket.emit ('userJoined', user._id);
+        users[socket.id] = user._id;
+      });
+    } else {
+      users[socket.id] = userId;
+    }
+    _sendExistingMessages (socket);
+  } catch (err) {
+    console.log (err);
+  }
+}
+
+function onMessageReceived (message, senderSocket) {
+  var userId = users[senderSocket.id];
+  if (!userId) return;
+  _sendAndSaveMessage (message, senderSocket);
+}
+
+function _sendExistingMessages () {
+  var messages = db
+    .collection ('messages')
+    .find ({chatId})
+    .sort ({createdAt: 1})
+    .toArray ((err, messages) => {
+      if (!messages.length) return;
+      socket.emit ('message', messages.reverse ());
+    });
+}
+
+function _sendAndSaveMessage (message, socket, fromServer) {
+  var messageData = {
+    text: message.text,
+    user: message.user,
+    createdAt: new Date (message, createdAt),
+    chatId: chatId,
+  };
+  db.collection (
+    'messages',
+    insert (messageData, (err, message) => {
+      var emitter = fromServer ? websocket : socket.broadcast;
+      emitter.emit ('message', [message]);
+    })
+  );
+
+  var stdin = process.openStdin ();
+  stdin.addListener ('data', function (d) {
+    _sendAndSaveMessage (
+      {
+        text: d.toString ().trim (),
+        createdAt: new Date (),
+        user: {_id: 'robot'},
+      },
+      null,
+      true
+    );
+  });
+}
